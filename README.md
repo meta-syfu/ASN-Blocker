@@ -1,7 +1,7 @@
 
 # Iran ISP'ip Blocker [![Telegram](https://img.shields.io/badge/Telegram-Join%20Channel-blue)](https://t.me/ch4mr0sh)
 
-A simple bash script to block IP ranges of `Iranian ISPs` to prevent your server from being blocked by `GFW`!
+A simple bash script to block IP ranges of `Iranian ISPs` to prevent your server from `Iranian Internet Censorship`!
 
 ## Usage
 Open your terminal and run this script :
