@@ -7,7 +7,7 @@ A simple bash script to block IP ranges of `Iranian ISPs` to prevent your server
 Open your terminal and run this script :
 
 ```bash
-  bash <(curl -s https://raw.githubusercontent.com/ch4mr00sh/IR-ISP-Blocker/master/ip-blocker.sh)
+  bash <(curl -s https://raw.githubusercontent.com/ch4mr00sh/ASN-Blocker/master/isp-blocker.sh)
 ```
 ## Features
 This script just support now :
