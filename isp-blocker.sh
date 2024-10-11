@@ -43,7 +43,7 @@ function main_menu {
     clear
     Figlet
     echo -e "${C_CHARTREUSE1}"
-    figlet "Ch4mr00sh"
+    figlet "Meta-Syfu"
 
     echo -e "${C_WHITE}Which ports do you want to configure?"
     read -p "Enter ports (e.g., 22343, 22, 2053): " ports
