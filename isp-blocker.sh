@@ -66,13 +66,39 @@ configure_always_open_ports() {
     done
 }
 
+# Function to clear all iptables rules
+clear_all_config() {
+    echo -e "${YELLOW}Clearing all iptables configurations...${ENDCOLOR}"
+    iptables -F
+    if [ $? -eq 0 ]; then
+        echo -e "${GREEN}All iptables rules have been cleared.${ENDCOLOR}"
+    else
+        echo -e "${RED}Failed to clear iptables rules.${ENDCOLOR}"
+    fi
+}
+
+# Function to list ISPs and let the user select one
+select_isp() {
+    echo "Select an ISP:"
+    select ISP_NAME in "${ISPS[@]}"; do
+        if [[ " ${ISPS[@]} " =~ " ${ISP_NAME} " ]]; then
+            echo -e "${YELLOW}You selected ${ISP_NAME}.${ENDCOLOR}"
+            break
+        else
+            echo -e "${RED}Invalid selection, please try again.${ENDCOLOR}"
+        fi
+    done
+    echo "$ISP_NAME"
+}
+
 # Main menu function
 main_menu() {
     clear
     echo "==================== ISP Blocker ===================="
     echo "1) Configure ports for specific ISPs"
     echo "2) Configure always open ports"
-    echo "3) Exit"
+    echo "3) Clear all iptables configurations"
+    echo "4) Exit"
     echo "====================================================="
     echo -n "Please select an option: "
     read OPTION
@@ -84,14 +110,8 @@ main_menu() {
             IFS=',' read -ra PORT_ARRAY <<< "$PORTS"
 
             for PORT in "${PORT_ARRAY[@]}"; do
-                echo -n "For port $PORT, specify the ISP (e.g., mtn, mci): "
-                read ISP_NAME
-
-                if [[ " ${ISPS[@]} " =~ " ${ISP_NAME} " ]]; then
-                    configure_ports_for_isp "$PORT" "$ISP_NAME"
-                else
-                    echo -e "${RED}Invalid ISP name: ${ISP_NAME}.${ENDCOLOR}"
-                fi
+                ISP_NAME=$(select_isp)
+                configure_ports_for_isp "$PORT" "$ISP_NAME"
             done
             echo "Press enter to return to the menu..."
             read
@@ -106,6 +126,12 @@ main_menu() {
             main_menu
             ;;
         3)
+            clear_all_config
+            echo "Press enter to return to the menu..."
+            read
+            main_menu
+            ;;
+        4)
             exit 0
             ;;
         *)
@@ -126,6 +152,19 @@ save_iptables() {
     fi
 }
 
+# Enable iptables service if not already running
+enable_firewall() {
+    echo -e "${YELLOW}Enabling iptables...${ENDCOLOR}"
+    systemctl enable iptables
+    systemctl start iptables
+    if [ $? -eq 0 ]; then
+        echo -e "${GREEN}iptables service started successfully.${ENDCOLOR}"
+    else
+        echo -e "${RED}Failed to start iptables service.${ENDCOLOR}"
+    fi
+}
+
 # Run the menu
+enable_firewall
 main_menu
 save_iptables
