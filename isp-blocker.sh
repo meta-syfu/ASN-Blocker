@@ -80,8 +80,9 @@ clear_all_config() {
 # Function to list ISPs and let the user select one
 select_isp() {
     echo "Select an ISP:"
+    PS3="Enter the number of the ISP: "
     select ISP_NAME in "${ISPS[@]}"; do
-        if [[ " ${ISPS[@]} " =~ " ${ISP_NAME} " ]]; then
+        if [[ -n "$ISP_NAME" ]]; then
             echo -e "${YELLOW}You selected ${ISP_NAME}.${ENDCOLOR}"
             break
         else
