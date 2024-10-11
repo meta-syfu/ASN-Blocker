@@ -12,7 +12,7 @@ download_ip_list() {
     URL="https://raw.githubusercontent.com/meta-syfu/ASN-Blocker/refs/heads/master/${ISP_NAME}.ipv4"
     DEST="/etc/iptables/${ISP_NAME}.ipv4"
 
-    echo -e "${YELLOW}Downloading IP list for ${ISP_NAME}...${ENDCOLOR}"
+    echo -e "${YELLOW}Downloading IP list for ${ISP_NAME} from ${URL}...${ENDCOLOR}"
     curl -s "$URL" -o "$DEST"
 
     if [ $? -eq 0 ]; then
@@ -47,6 +47,7 @@ configure_ports_for_isp() {
     # Apply iptables rules
     while read -r IP; do
         if [ -n "$IP" ]; then
+            echo -e "${GREEN}Adding rule for IP: ${IP} on port ${PORT}${ENDCOLOR}"
             iptables -A INPUT -p tcp --dport "$PORT" -s "$IP" -j ACCEPT
         fi
     done < "/etc/iptables/${ISP_NAME}.ipv4"
