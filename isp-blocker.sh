@@ -9,15 +9,35 @@ NC='\033[0m' # No Color
 
 # ASN lookup API Key
 API_KEY="f610de5592msh075dc56033ecc9cp19fc2fjsn25362856a249"
+ASN_LOOKUP_URL="https://asn-lookup.p.rapidapi.com/api"
+
+# Function to fetch IP ranges from ASN
+fetch_ip_ranges() {
+    ASN=$1
+    echo -e "${YELLOW}Fetching IP ranges for ASN: $ASN...${NC}"
+    
+    response=$(curl -s -X GET "$ASN_LOOKUP_URL?asn=$ASN" \
+        -H "Host: asn-lookup.p.rapidapi.com" \
+        -H "X-Rapidapi-Host: asn-lookup.p.rapidapi.com" \
+        -H "X-Rapidapi-Key: $API_KEY")
+
+    # Check if the response contains IP ranges
+    if [[ $response == *"ipv4_prefix"* ]]; then
+        # Extract IP ranges
+        echo "$response" | grep -oP '"ipv4_prefix":\s*\[\K[^\]]+' | tr -d '"' | tr ',' '\n'
+    else
+        echo -e "${RED}Error fetching IP ranges for ASN: $ASN${NC}"
+        echo -e "${RED}Response: $response${NC}"
+        return 1
+    fi
+}
 
 # Function to apply iptables rules for a specific ISP
 apply_isp_rules() {
     ISP=$1
     PORT=$2
 
-    echo -e "${YELLOW}Fetching IP list for $ISP...${NC}"
-    
-    # Fetch the ISP's IP list based on the ASN using the API
+    # Map ISP to ASN
     case $ISP in
         1) ASN="AS197207" ;;  # MCI
         2) ASN="AS43754" ;;   # AsiaTech
@@ -31,19 +51,16 @@ apply_isp_rules() {
         *) echo -e "${RED}Invalid ISP selection!${NC}"; return ;;
     esac
 
-    # Call the API to get the IP list for the selected ASN
-    IP_LIST=$(curl -s -X GET "https://asn-lookup.p.rapidapi.com/api?asn=$ASN" \
-    -H "X-Rapidapi-Host: asn-lookup.p.rapidapi.com" \
-    -H "X-Rapidapi-Key: $API_KEY" | jq -r '.[0].ipv4_prefix[]')
+    # Fetch the IP ranges for the selected ASN
+    IP_LIST=$(fetch_ip_ranges $ASN)
 
-    if [[ -z "$IP_LIST" ]]; then
-        echo -e "${RED}No IP ranges found for ASN $ASN!${NC}"
-        return
+    if [[ $? -ne 0 ]]; then
+        return 1
     fi
 
     echo -e "${GREEN}Applying rules for ISP $ISP on port $PORT...${NC}"
 
-    # Block all other IPs and allow the selected ISP's IPs on the specified port
+    # Apply iptables rules to allow traffic from the ISP's IP ranges on the specified port
     for IP in $IP_LIST; do
         iptables -A INPUT -p tcp -s $IP --dport $PORT -j ACCEPT
     done
