@@ -1,156 +1,105 @@
 #!/bin/bash
 
-# Color setup for text
-RED='\033[0;31m'
-GREEN='\033[0;32m'
-YELLOW='\033[0;33m'
-CYAN='\033[0;36m'
-NC='\033[0m' # No Color
-
-# ASN lookup API Key
-API_KEY="f610de5592msh075dc56033ecc9cp19fc2fjsn25362856a249"
 ASN_LOOKUP_URL="https://asn-lookup.p.rapidapi.com/api"
+ASN_API_KEY="f610de5592msh075dc56033ecc9cp19fc2fjsn25362856a249"
 
-# Function to fetch IP ranges from ASN
+# دریافت رنج IP ها از ASN
 fetch_ip_ranges() {
     ASN=$1
-    echo -e "${YELLOW}Fetching IP ranges for ASN: $ASN...${NC}"
-    
-    # Call ASN API to get IP ranges
+    echo "Fetching IP ranges for ASN: $ASN"
     response=$(curl -s -X GET "$ASN_LOOKUP_URL?asn=$ASN" \
         -H "Host: asn-lookup.p.rapidapi.com" \
         -H "X-Rapidapi-Host: asn-lookup.p.rapidapi.com" \
-        -H "X-Rapidapi-Key: $API_KEY")
-
-    # Use jq to parse the response and extract IPv4 and IPv6 ranges
-    ipv4_ranges=$(echo "$response" | jq -r '.ipv4_prefix[]?')
-    ipv6_ranges=$(echo "$response" | jq -r '.ipv6_prefix[]?')
-
-    if [[ -n "$ipv4_ranges" ]]; then
-        echo -e "${GREEN}IPv4 ranges for ASN $ASN:${NC}"
-        echo "$ipv4_ranges"
+        -H "X-Rapidapi-Key: $ASN_API_KEY")
+    
+    if [[ $response == *"ipv4_prefix"* ]]; then
+        echo "$response" | jq -r '.ipv4_prefix[]'
     else
-        echo -e "${RED}No IPv4 ranges found for ASN $ASN${NC}"
+        echo "No IP ranges found for ASN: $ASN"
     fi
 
-    if [[ -n "$ipv6_ranges" ]]; then
-        echo -e "${GREEN}IPv6 ranges for ASN $ASN:${NC}"
-        echo "$ipv6_ranges"
+    if [[ $response == *"ipv6_prefix"* ]]; then
+        echo "$response" | jq -r '.ipv6_prefix[]'
     else
-        echo -e "${RED}No IPv6 ranges found for ASN $ASN${NC}"
+        echo "No IPv6 ranges found for ASN: $ASN"
     fi
-
-    # Combine both IPv4 and IPv6 ranges
-    all_ip_ranges="$ipv4_ranges $ipv6_ranges"
-    echo "$all_ip_ranges"
 }
 
-# Function to apply iptables rules for a specific ISP (both IPv4 and IPv6)
-apply_isp_rules() {
+# اعمال قوانین iptables برای یک ISP و پورت مشخص
+apply_rules() {
     ISP=$1
     PORT=$2
+    echo "Applying rules for ISP $ISP on port $PORT..."
 
-    # Map ISP to ASN
-    case $ISP in
-        1) ASN="AS197207" ;;  # MCI
-        2) ASN="AS43754" ;;   # AsiaTech
-        3) ASN="AS44244" ;;   # MTN Irancell
-        4) ASN="AS50810" ;;   # MobinNet
-        5) ASN="AS16322" ;;   # ParsOnline
-        6) ASN="AS57831" ;;   # Pishgaman
-        7) ASN="AS57218" ;;   # Rightel
-        8) ASN="AS31549" ;;   # Shatel
-        9) ASN="AS58224" ;;   # TCI
-        *) echo -e "${RED}Invalid ISP selection!${NC}"; return ;;
-    esac
-
-    # Fetch the IP ranges for the selected ASN (both IPv4 and IPv6)
-    IP_LIST=$(fetch_ip_ranges $ASN)
-
-    # If no IPs are returned, exit early
-    if [[ -z "$IP_LIST" ]]; then
-        echo -e "${RED}No IP ranges found for ASN: $ASN${NC}"
-        return 1
+    IP_RANGES=$(fetch_ip_ranges $ISP)
+    if [[ -n "$IP_RANGES" ]]; then
+        for IP in $IP_RANGES; do
+            iptables -A INPUT -p tcp --dport $PORT -s $IP -j ACCEPT
+            echo "Allowed IPv4 traffic from $IP on port $PORT"
+        done
     fi
 
-    echo -e "${GREEN}Applying rules for ISP $ISP on port $PORT...${NC}"
+    # برای IPv6 هم قوانین را اعمال کنیم
+    IP6_RANGES=$(fetch_ip_ranges $ISP | grep ':')
 
-    # Apply iptables rules to allow traffic from the ISP's IP ranges on the specified port (IPv4)
-    for IP in $IP_LIST; do
-        if [[ "$IP" =~ : ]]; then
-            # This is an IPv6 address
-            ip6tables -A INPUT -p tcp -s $IP --dport $PORT -j ACCEPT
-            echo -e "${CYAN}Allowed IPv6 traffic from $IP on port $PORT${NC}"
-        else
-            # This is an IPv4 address
-            iptables -A INPUT -p tcp -s $IP --dport $PORT -j ACCEPT
-            echo -e "${CYAN}Allowed IPv4 traffic from $IP on port $PORT${NC}"
-        fi
-    done
-
-    # Block all other connections on the specified port
-    iptables -A INPUT -p tcp --dport $PORT -j DROP
-    ip6tables -A INPUT -p tcp --dport $PORT -j DROP
-
-    echo -e "${GREEN}Rules applied successfully for $ISP on port $PORT!${NC}"
+    if [[ -n "$IP6_RANGES" ]]; then
+        for IP6 in $IP6_RANGES; do
+            ip6tables -A INPUT -p tcp --dport $PORT -s $IP6 -j ACCEPT
+            echo "Allowed IPv6 traffic from $IP6 on port $PORT"
+        done
+    fi
+    echo "Rules applied successfully for ISP $ISP on port $PORT!"
 }
 
-# Set default ports for all ISPs
-set_default_ports() {
-    PORTS=($1)
-    for PORT in "${PORTS[@]}"; do
-        iptables -A INPUT -p tcp --dport $PORT -j ACCEPT
-        ip6tables -A INPUT -p tcp --dport $PORT -j ACCEPT
-        echo -e "${CYAN}Opened port $PORT for all ISPs (IPv4 and IPv6)${NC}"
-    done
-    echo -e "${GREEN}Default ports $1 are now open for all ISPs (IPv4 and IPv6)!${NC}"
+# نمایش قوانین فعال
+view_active_rules() {
+    echo "Active IPv4 Rules:"
+    iptables -L
+    echo "Active IPv6 Rules:"
+    ip6tables -L
 }
 
-# Clear all iptables rules
-clear_rules() {
-    iptables -F
-    ip6tables -F
-    echo -e "${RED}All rules have been cleared!${NC}"
+# نمایش لاگ‌ها
+view_logs() {
+    echo "Showing iptables logs:"
+    tail -n 50 /var/log/syslog | grep 'iptables'
 }
 
-# Main menu
+# منو اصلی
 while true; do
-    echo -e "${CYAN}1) Set rules for specific ISP and port${NC}"
-    echo -e "${CYAN}2) Set default ports for all ISPs${NC}"
-    echo -e "${CYAN}3) Clear all rules${NC}"
-    echo -e "${CYAN}4) Exit${NC}"
-    read -p "Select an option: " OPTION
-
-    case $OPTION in
+    echo "1) Set rules for specific ISP and port"
+    echo "2) View active rules"
+    echo "3) View logs"
+    echo "4) Exit"
+    read -p "Select an option: " option
+    case $option in
         1)
-            echo -e "${CYAN}Available ISPs:${NC}"
-            echo -e "${CYAN}1) MCI${NC}"
-            echo -e "${CYAN}2) AsiaTech${NC}"
-            echo -e "${CYAN}3) MTN Irancell${NC}"
-            echo -e "${CYAN}4) MobinNet${NC}"
-            echo -e "${CYAN}5) ParsOnline${NC}"
-            echo -e "${CYAN}6) Pishgaman${NC}"
-            echo -e "${CYAN}7) Rightel${NC}"
-            echo -e "${CYAN}8) Shatel${NC}"
-            echo -e "${CYAN}9) TCI${NC}"
-            echo -e "${CYAN}0) Back${NC}"
-            read -p "Enter ISP number: " ISP
-            [ "$ISP" -eq 0 ] && continue
-            read -p "Enter port: " PORT
-            apply_isp_rules $ISP $PORT
+            echo "Available ISPs:"
+            echo "1) MCI"
+            echo "2) AsiaTech"
+            echo "3) MTN Irancell"
+            echo "4) MobinNet"
+            echo "5) ParsOnline"
+            echo "6) Pishgaman"
+            echo "7) Rightel"
+            echo "8) Shatel"
+            echo "9) TCI"
+            echo "0) Back"
+            read -p "Enter ISP number: " isp
+            read -p "Enter port: " port
+            apply_rules $isp $port
             ;;
         2)
-            read -p "Enter default ports (comma-separated, e.g. 22,2053): " DEFAULT_PORTS
-            set_default_ports $(echo $DEFAULT_PORTS | tr ',' ' ')
+            view_active_rules
             ;;
         3)
-            clear_rules
+            view_logs
             ;;
         4)
-            exit 0
+            break
             ;;
         *)
-            echo -e "${RED}Invalid option, please try again!${NC}"
+            echo "Invalid option"
             ;;
     esac
 done
