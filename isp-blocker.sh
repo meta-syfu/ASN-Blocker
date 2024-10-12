@@ -22,18 +22,30 @@ fetch_ip_ranges() {
         -H "X-Rapidapi-Host: asn-lookup.p.rapidapi.com" \
         -H "X-Rapidapi-Key: $API_KEY")
 
-    # Extract IP ranges from the response
-    if [[ $response == *"ipv4_prefix"* ]]; then
-        ip_ranges=$(echo "$response" | grep -oP '"ipv4_prefix":\s*\[\K[^\]]+' | tr -d '"' | tr ',' '\n')
-        echo "$ip_ranges"
+    # Use jq to parse the response and extract IPv4 and IPv6 ranges
+    ipv4_ranges=$(echo "$response" | jq -r '.ipv4_prefix[]?')
+    ipv6_ranges=$(echo "$response" | jq -r '.ipv6_prefix[]?')
+
+    if [[ -n "$ipv4_ranges" ]]; then
+        echo -e "${GREEN}IPv4 ranges for ASN $ASN:${NC}"
+        echo "$ipv4_ranges"
     else
-        echo -e "${RED}Error fetching IP ranges for ASN: $ASN${NC}"
-        echo -e "${RED}Response: $response${NC}"
-        return 1
+        echo -e "${RED}No IPv4 ranges found for ASN $ASN${NC}"
     fi
+
+    if [[ -n "$ipv6_ranges" ]]; then
+        echo -e "${GREEN}IPv6 ranges for ASN $ASN:${NC}"
+        echo "$ipv6_ranges"
+    else
+        echo -e "${RED}No IPv6 ranges found for ASN $ASN${NC}"
+    fi
+
+    # Combine both IPv4 and IPv6 ranges
+    all_ip_ranges="$ipv4_ranges $ipv6_ranges"
+    echo "$all_ip_ranges"
 }
 
-# Function to apply iptables rules for a specific ISP
+# Function to apply iptables rules for a specific ISP (both IPv4 and IPv6)
 apply_isp_rules() {
     ISP=$1
     PORT=$2
@@ -52,25 +64,33 @@ apply_isp_rules() {
         *) echo -e "${RED}Invalid ISP selection!${NC}"; return ;;
     esac
 
-    # Fetch the IP ranges for the selected ASN
+    # Fetch the IP ranges for the selected ASN (both IPv4 and IPv6)
     IP_LIST=$(fetch_ip_ranges $ASN)
 
     # If no IPs are returned, exit early
-    if [[ $? -ne 0 || -z "$IP_LIST" ]]; then
+    if [[ -z "$IP_LIST" ]]; then
         echo -e "${RED}No IP ranges found for ASN: $ASN${NC}"
         return 1
     fi
 
     echo -e "${GREEN}Applying rules for ISP $ISP on port $PORT...${NC}"
 
-    # Apply iptables rules to allow traffic from the ISP's IP ranges on the specified port
+    # Apply iptables rules to allow traffic from the ISP's IP ranges on the specified port (IPv4)
     for IP in $IP_LIST; do
-        iptables -A INPUT -p tcp -s $IP --dport $PORT -j ACCEPT
-        echo -e "${CYAN}Allowed traffic from $IP on port $PORT${NC}"
+        if [[ "$IP" =~ : ]]; then
+            # This is an IPv6 address
+            ip6tables -A INPUT -p tcp -s $IP --dport $PORT -j ACCEPT
+            echo -e "${CYAN}Allowed IPv6 traffic from $IP on port $PORT${NC}"
+        else
+            # This is an IPv4 address
+            iptables -A INPUT -p tcp -s $IP --dport $PORT -j ACCEPT
+            echo -e "${CYAN}Allowed IPv4 traffic from $IP on port $PORT${NC}"
+        fi
     done
 
     # Block all other connections on the specified port
     iptables -A INPUT -p tcp --dport $PORT -j DROP
+    ip6tables -A INPUT -p tcp --dport $PORT -j DROP
 
     echo -e "${GREEN}Rules applied successfully for $ISP on port $PORT!${NC}"
 }
@@ -80,14 +100,16 @@ set_default_ports() {
     PORTS=($1)
     for PORT in "${PORTS[@]}"; do
         iptables -A INPUT -p tcp --dport $PORT -j ACCEPT
-        echo -e "${CYAN}Opened port $PORT for all ISPs${NC}"
+        ip6tables -A INPUT -p tcp --dport $PORT -j ACCEPT
+        echo -e "${CYAN}Opened port $PORT for all ISPs (IPv4 and IPv6)${NC}"
     done
-    echo -e "${GREEN}Default ports $1 are now open for all ISPs!${NC}"
+    echo -e "${GREEN}Default ports $1 are now open for all ISPs (IPv4 and IPv6)!${NC}"
 }
 
 # Clear all iptables rules
 clear_rules() {
     iptables -F
+    ip6tables -F
     echo -e "${RED}All rules have been cleared!${NC}"
 }
 
