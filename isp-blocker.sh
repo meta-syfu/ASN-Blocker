@@ -1,54 +1,64 @@
 #!/bin/bash
 
-# Colors
+# Colors for output
 RED="\e[31m"
 GREEN="\e[32m"
 YELLOW="\e[33m"
 ENDCOLOR="\e[0m"
 
-# Function to download IP lists
-download_ip_list() {
-    ISP_NAME=$1
-    URL="https://raw.githubusercontent.com/meta-syfu/ASN-Blocker/refs/heads/master/${ISP_NAME}.ipv4"
-    DEST="/etc/iptables/${ISP_NAME}.ipv4"
-
-    echo -e "${YELLOW}Downloading IP list for ${ISP_NAME} from ${URL}...${ENDCOLOR}"
-    curl -s "$URL" -o "$DEST"
-
-    if [ $? -eq 0 ]; then
-        echo -e "${GREEN}${ISP_NAME} IP list downloaded successfully.${ENDCOLOR}"
-    else
-        echo -e "${RED}Failed to download ${ISP_NAME} IP list.${ENDCOLOR}"
-    fi
-}
+# Array of ISPs and URLs to download IP lists
+declare -A ISPS
+ISPS=(
+    ["asiatech"]="https://raw.githubusercontent.com/meta-syfu/ASN-Blocker/master/asiatech.ipv4"
+    ["mci"]="https://raw.githubusercontent.com/meta-syfu/ASN-Blocker/master/mci.ipv4"
+    ["mobinnet"]="https://raw.githubusercontent.com/meta-syfu/ASN-Blocker/master/mobinnet.ipv4"
+    ["mtn"]="https://raw.githubusercontent.com/meta-syfu/ASN-Blocker/master/mtn.ipv4"
+    ["parsan"]="https://raw.githubusercontent.com/meta-syfu/ASN-Blocker/master/parsan.ipv4"
+    ["pishgaman"]="https://raw.githubusercontent.com/meta-syfu/ASN-Blocker/master/pishgaman.ipv4"
+    ["ritel"]="https://raw.githubusercontent.com/meta-syfu/ASN-Blocker/master/ritel.ipv4"
+    ["shatel"]="https://raw.githubusercontent.com/meta-syfu/ASN-Blocker/master/shatel.ipv4"
+    ["tci"]="https://raw.githubusercontent.com/meta-syfu/ASN-Blocker/master/tci.ipv4"
+)
 
 # Create /etc/iptables directory if it does not exist
 mkdir -p /etc/iptables
 
-# Array of ISPs
-ISPS=("asiatech" "mci" "mobinnet" "mtn" "parsan" "pishgaman" "ritel" "shatel" "tci")
+# Function to download IP lists
+download_ip_list() {
+    ISP_NAME=$1
+    URL=${ISPS[$ISP_NAME]}
+    DEST="/etc/iptables/${ISP_NAME}.ipv4"
 
-# Download IP lists for all ISPs
-for ISP in "${ISPS[@]}"; do
-    download_ip_list "$ISP"
-done
+    echo -e "${YELLOW}Downloading IP list for ${ISP_NAME}...${ENDCOLOR}"
+    curl -s "$URL" -o "$DEST"
 
-# Function to apply iptables rules for specific ISP
+    if [ $? -eq 0 ] && [ -s "$DEST" ]; then
+        echo -e "${GREEN}${ISP_NAME} IP list downloaded successfully.${ENDCOLOR}"
+    else
+        echo -e "${RED}Failed to download ${ISP_NAME} IP list or the file is empty.${ENDCOLOR}"
+        return 1
+    fi
+}
+
+# Function to configure ports for specific ISP
 configure_ports_for_isp() {
     PORT=$1
     ISP_NAME=$2
     echo -e "${YELLOW}Configuring port ${PORT} for ISP ${ISP_NAME}...${ENDCOLOR}"
 
     if [ ! -f "/etc/iptables/${ISP_NAME}.ipv4" ]; then
-        echo -e "${RED}IP list for ${ISP_NAME} not found. Skipping...${ENDCOLOR}"
-        return
+        echo -e "${RED}IP list for ${ISP_NAME} not found. Downloading...${ENDCOLOR}"
+        download_ip_list "$ISP_NAME"
+        if [ $? -ne 0 ]; then
+            echo -e "${RED}Failed to configure port ${PORT} for ISP ${ISP_NAME} due to missing IP list.${ENDCOLOR}"
+            return
+        fi
     fi
 
-    # Apply iptables rules
+    # Apply ufw rules
     while read -r IP; do
         if [ -n "$IP" ]; then
-            echo -e "${GREEN}Adding rule for IP: ${IP} on port ${PORT}${ENDCOLOR}"
-            iptables -A INPUT -p tcp --dport "$PORT" -s "$IP" -j ACCEPT
+            sudo ufw allow from "$IP" to any port "$PORT" proto tcp
         fi
     done < "/etc/iptables/${ISP_NAME}.ipv4"
 
@@ -62,28 +72,23 @@ configure_always_open_ports() {
 
     for PORT in "${PORT_ARRAY[@]}"; do
         echo -e "${YELLOW}Opening port ${PORT} for all ISPs...${ENDCOLOR}"
-        iptables -A INPUT -p tcp --dport "$PORT" -j ACCEPT
+        sudo ufw allow "$PORT"/tcp
         echo -e "${GREEN}Port ${PORT} is open for all ISPs.${ENDCOLOR}"
     done
 }
 
-# Function to clear all iptables rules
+# Function to clear all ufw rules
 clear_all_config() {
-    echo -e "${YELLOW}Clearing all iptables configurations...${ENDCOLOR}"
-    iptables -F
-    if [ $? -eq 0 ]; then
-        echo -e "${GREEN}All iptables rules have been cleared.${ENDCOLOR}"
-    else
-        echo -e "${RED}Failed to clear iptables rules.${ENDCOLOR}"
-    fi
+    echo -e "${YELLOW}Clearing all ufw rules...${ENDCOLOR}"
+    sudo ufw reset
+    echo -e "${GREEN}All ufw rules have been cleared.${ENDCOLOR}"
 }
 
 # Function to list ISPs and let the user select one
 select_isp() {
     echo "Select an ISP:"
-    PS3="Enter the number of the ISP: "
-    select ISP_NAME in "${ISPS[@]}"; do
-        if [[ -n "$ISP_NAME" ]]; then
+    select ISP_NAME in "${!ISPS[@]}"; do
+        if [[ -n "${ISPS[$ISP_NAME]}" ]]; then
             echo -e "${YELLOW}You selected ${ISP_NAME}.${ENDCOLOR}"
             break
         else
@@ -99,7 +104,7 @@ main_menu() {
     echo "==================== ISP Blocker ===================="
     echo "1) Configure ports for specific ISPs"
     echo "2) Configure always open ports"
-    echo "3) Clear all iptables configurations"
+    echo "3) Clear all ufw configurations"
     echo "4) Exit"
     echo "====================================================="
     echo -n "Please select an option: "
@@ -143,30 +148,17 @@ main_menu() {
     esac
 }
 
-# Save iptables rules
-save_iptables() {
-    echo -e "${YELLOW}Saving iptables rules...${ENDCOLOR}"
-    iptables-save > /etc/iptables/rules.v4
-    if [ $? -eq 0 ]; then
-        echo -e "${GREEN}iptables rules saved successfully.${ENDCOLOR}"
-    else
-        echo -e "${RED}Failed to save iptables rules.${ENDCOLOR}"
-    fi
-}
-
-# Enable iptables service if not already running
+# Enable ufw if not already enabled
 enable_firewall() {
-    echo -e "${YELLOW}Enabling iptables...${ENDCOLOR}"
-    systemctl enable iptables
-    systemctl start iptables
+    echo -e "${YELLOW}Enabling ufw...${ENDCOLOR}"
+    sudo ufw enable
     if [ $? -eq 0 ]; then
-        echo -e "${GREEN}iptables service started successfully.${ENDCOLOR}"
+        echo -e "${GREEN}ufw enabled successfully.${ENDCOLOR}"
     else
-        echo -e "${RED}Failed to start iptables service.${ENDCOLOR}"
+        echo -e "${RED}Failed to enable ufw.${ENDCOLOR}"
     fi
 }
 
 # Run the menu
 enable_firewall
 main_menu
-save_iptables
