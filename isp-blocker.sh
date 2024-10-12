@@ -1,137 +1,112 @@
 #!/bin/bash
 
-ASN_API_KEY="f610de5592msh075dc56033ecc9cp19fc2fjsn25362856a249"
-ASN_LOOKUP_URL="https://asn-lookup.p.rapidapi.com/api"
+# Color setup for text
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[0;33m'
+CYAN='\033[0;36m'
+NC='\033[0m' # No Color
 
-declare -A ASN_LIST=(
-    ["MCI"]="AS197207"
-    ["AsiaTech"]="AS43754"
-    ["MTN"]="AS44244"
-    ["MobinNet"]="AS50810"
-    ["ParsOnline"]="AS16322"
-    ["Pishgaman"]="AS57831"
-    ["Rightel"]="AS57218"
-    ["Shatel"]="AS31549"
-    ["TCI"]="AS58224"
-)
+# ASN lookup API Key
+API_KEY="f610de5592msh075dc56033ecc9cp19fc2fjsn25362856a249"
 
-# نمایش قوانین iptables فعلی
-show_rules() {
-    echo "Current iptables rules:"
-    iptables -S || echo "Error showing iptables rules"
-}
+# Function to apply iptables rules for a specific ISP
+apply_isp_rules() {
+    ISP=$1
+    PORT=$2
 
-# دریافت رنج IP ها از ASN
-fetch_ip_ranges() {
-    ASN=$1
-    echo "Fetching IP ranges for ASN: $ASN"
-    response=$(curl -s -X GET "$ASN_LOOKUP_URL?asn=$ASN" \
-        -H "Host: asn-lookup.p.rapidapi.com" \
-        -H "X-Rapidapi-Host: asn-lookup.p.rapidapi.com" \
-        -H "X-Rapidapi-Key: $ASN_API_KEY")
+    echo -e "${YELLOW}Fetching IP list for $ISP...${NC}"
     
-    if [[ $response == *"ipv4_prefix"* ]]; then
-        echo "$response" | grep -oP '"ipv4_prefix":\s*\[\K[^\]]+' | tr -d '"' | tr ',' '\n'
-    else
-        echo "Error fetching IP ranges for ASN: $ASN"
-        echo "Response: $response"
+    # Fetch the ISP's IP list based on the ASN using the API
+    case $ISP in
+        1) ASN="AS197207" ;;
+        2) ASN="AS43754" ;;
+        3) ASN="AS44244" ;;
+        4) ASN="AS50810" ;;
+        5) ASN="AS16322" ;;
+        6) ASN="AS57831" ;;
+        7) ASN="AS57218" ;;
+        8) ASN="AS31549" ;;
+        9) ASN="AS58224" ;;
+        *) echo -e "${RED}Invalid ISP selection!${NC}"; return ;;
+    esac
+
+    # Call the API to get the IP list for the selected ASN
+    IP_LIST=$(curl -s -X GET "https://asn-lookup.p.rapidapi.com/api?asn=$ASN" \
+    -H "X-Rapidapi-Host: asn-lookup.p.rapidapi.com" \
+    -H "X-Rapidapi-Key: $API_KEY" | jq -r '.[0].ipv4_prefix[]')
+
+    if [[ -z "$IP_LIST" ]]; then
+        echo -e "${RED}No IP ranges found for ASN $ASN!${NC}"
+        return
     fi
-}
 
-# ست کردن iptables برای یک ISP و پورت مشخص
-set_iptables_for_isp() {
-    ISP=$1
-    PORT=$2
-    DEFAULT_PORTS=$3
+    echo -e "${GREEN}Applying rules for ISP $ISP on port $PORT...${NC}"
 
-    # دریافت رنج‌های IP برای ISP
-    ASN=${ASN_LIST[$ISP]}
-    echo "Setting iptables rules for $ISP (ASN: $ASN) on port $PORT"
-    IP_RANGES=$(fetch_ip_ranges $ASN)
-
-    # باز کردن پورت برای IPهای خاص و بلاک کردن سایرین
-    for IP_RANGE in $IP_RANGES; do
-        echo "Allowing $IP_RANGE for port $PORT"
-        iptables -A INPUT -p tcp --dport $PORT -s $IP_RANGE -j ACCEPT
+    # Block all other IPs and allow the selected ISP's IPs on the specified port
+    for IP in $IP_LIST; do
+        iptables -A INPUT -p tcp -s $IP --dport $PORT -j ACCEPT
     done
 
-    # بلاک کردن همه IP‌های دیگر برای پورت مشخص‌شده
-    echo "Blocking all other IPs for port $PORT"
+    # Block all other connections on the specified port
     iptables -A INPUT -p tcp --dport $PORT -j DROP
-    
-    # باز کردن پورت‌های دیفالت برای همه ISP ها
-    for DEFAULT_PORT in ${DEFAULT_PORTS//,/ }; do
-        echo "Allowing default port $DEFAULT_PORT for all ISPs"
-        iptables -A INPUT -p tcp --dport $DEFAULT_PORT -j ACCEPT
+
+    echo -e "${GREEN}Rules applied successfully for $ISP on port $PORT!${NC}"
+}
+
+# Set default ports for all ISPs
+set_default_ports() {
+    PORTS=($1)
+    for PORT in "${PORTS[@]}"; do
+        iptables -A INPUT -p tcp --dport $PORT -j ACCEPT
     done
-
-    # باز کردن پورت SSH (22) همیشه
-    echo "Allowing SSH (port 22)"
-    iptables -A INPUT -p tcp --dport 22 -j ACCEPT
+    echo -e "${GREEN}Default ports $1 are now open for all ISPs!${NC}"
 }
 
-# حذف قوانین iptables برای یک ISP
-clear_isp_rules() {
-    ISP=$1
-    PORT=$2
-
-    ASN=${ASN_LIST[$ISP]}
-    echo "Clearing rules for $ISP (ASN: $ASN) on port $PORT"
-    IP_RANGES=$(fetch_ip_ranges $ASN)
-
-    for IP_RANGE in $IP_RANGES; do
-        echo "Removing $IP_RANGE for port $PORT"
-        iptables -D INPUT -p tcp --dport $PORT -s $IP_RANGE -j ACCEPT
-    done
-
-    iptables -D INPUT -p tcp --dport $PORT -j DROP
+# Clear all iptables rules
+clear_rules() {
+    iptables -F
+    echo -e "${RED}All rules have been cleared!${NC}"
 }
 
-# ذخیره قوانین iptables بعد از ریبوت
-save_iptables_rules() {
-    echo "Saving iptables rules"
-    iptables-save > /etc/iptables/rules.v4 || echo "Error saving iptables rules"
-}
+# Main menu
+while true; do
+    echo -e "${CYAN}1) Set rules for specific ISP and port${NC}"
+    echo -e "${CYAN}2) Set default ports for all ISPs${NC}"
+    echo -e "${CYAN}3) Clear all rules${NC}"
+    echo -e "${CYAN}4) Exit${NC}"
+    read -p "Select an option: " OPTION
 
-# منوی اصلی
-main_menu() {
-    while true; do
-        clear
-        show_rules
-        echo "1) Set rules for specific ISP and port"
-        echo "2) Set default ports for all ISPs"
-        echo "3) Clear all rules"
-        echo "4) Exit"
-        read -p "Select an option: " OPTION
-
-        case $OPTION in
-            1)
-                echo "Available ISPs: ${!ASN_LIST[@]}"
-                read -p "Enter ISP: " ISP
-                read -p "Enter port: " PORT
-                read -p "Enter default ports for all ISPs (comma-separated): " DEFAULT_PORTS
-                set_iptables_for_isp "$ISP" "$PORT" "$DEFAULT_PORTS"
-                save_iptables_rules
-                ;;
-            2)
-                read -p "Enter default ports (comma-separated): " DEFAULT_PORTS
-                for ISP in "${!ASN_LIST[@]}"; do
-                    set_iptables_for_isp "$ISP" "0" "$DEFAULT_PORTS"
-                done
-                save_iptables_rules
-                ;;
-            3)
-                iptables -F
-                save_iptables_rules
-                ;;
-            4)
-                exit 0
-                ;;
-            *)
-                echo "Invalid option, please try again."
-                ;;
-        esac
-    done
-}
-
-main_menu
+    case $OPTION in
+        1)
+            echo -e "${CYAN}Available ISPs:${NC}"
+            echo -e "${CYAN}1) MCI${NC}"
+            echo -e "${CYAN}2) AsiaTech${NC}"
+            echo -e "${CYAN}3) MTN Irancell${NC}"
+            echo -e "${CYAN}4) MobinNet${NC}"
+            echo -e "${CYAN}5) ParsOnline${NC}"
+            echo -e "${CYAN}6) Pishgaman${NC}"
+            echo -e "${CYAN}7) Rightel${NC}"
+            echo -e "${CYAN}8) Shatel${NC}"
+            echo -e "${CYAN}9) TCI${NC}"
+            echo -e "${CYAN}0) Back${NC}"
+            read -p "Enter ISP number: " ISP
+            [ "$ISP" -eq 0 ] && continue
+            read -p "Enter port: " PORT
+            apply_isp_rules $ISP $PORT
+            ;;
+        2)
+            read -p "Enter default ports (comma-separated, e.g. 22,2053): " DEFAULT_PORTS
+            set_default_ports $(echo $DEFAULT_PORTS | tr ',' ' ')
+            ;;
+        3)
+            clear_rules
+            ;;
+        4)
+            exit 0
+            ;;
+        *)
+            echo -e "${RED}Invalid option, please try again!${NC}"
+            ;;
+    esac
+done
