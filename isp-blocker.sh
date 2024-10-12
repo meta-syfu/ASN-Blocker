@@ -19,15 +19,15 @@ apply_isp_rules() {
     
     # Fetch the ISP's IP list based on the ASN using the API
     case $ISP in
-        1) ASN="AS197207" ;;
-        2) ASN="AS43754" ;;
-        3) ASN="AS44244" ;;
-        4) ASN="AS50810" ;;
-        5) ASN="AS16322" ;;
-        6) ASN="AS57831" ;;
-        7) ASN="AS57218" ;;
-        8) ASN="AS31549" ;;
-        9) ASN="AS58224" ;;
+        1) ASN="AS197207" ;;  # MCI
+        2) ASN="AS43754" ;;   # AsiaTech
+        3) ASN="AS44244" ;;   # MTN Irancell
+        4) ASN="AS50810" ;;   # MobinNet
+        5) ASN="AS16322" ;;   # ParsOnline
+        6) ASN="AS57831" ;;   # Pishgaman
+        7) ASN="AS57218" ;;   # Rightel
+        8) ASN="AS31549" ;;   # Shatel
+        9) ASN="AS58224" ;;   # TCI
         *) echo -e "${RED}Invalid ISP selection!${NC}"; return ;;
     esac
 
