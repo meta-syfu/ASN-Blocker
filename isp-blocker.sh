@@ -1,141 +1,126 @@
 #!/bin/bash
 
-# نمایش قوانین موجود
-echo "Current ufw rules:"
-ufw status numbered
+ASN_API_KEY="f610de5592msh075dc56033ecc9cp19fc2fjsn25362856a249"
+ASN_LOOKUP_URL="https://asn-lookup.p.rapidapi.com/api"
 
-# انتخاب نوع عملیات
-while true; do
-    echo "Select an option:"
-    echo "1) Choose ISP and set ports"
-    echo "2) Set ports open for all ISPs"
-    echo "3) Clear all rules"
-    echo "4) Exit"
-    read -p "Enter option: " option
+declare -A ASN_LIST=(
+    ["MCI"]="AS197207"
+    ["AsiaTech"]="AS43754"
+    ["MTN"]="AS44244"
+    ["MobinNet"]="AS50810"
+    ["ParsOnline"]="AS16322"
+    ["Pishgaman"]="AS57831"
+    ["Rightel"]="AS57218"
+    ["Shatel"]="AS31549"
+    ["TCI"]="AS58224"
+)
 
-    case $option in
-        1)
-            # انتخاب ISP و تنظیم پورت‌ها
-            while true; do
-                echo "Select ISP:"
-                echo "1) MCI"
-                echo "2) MTN"
-                echo "3) TCI"
-                echo "4) Rightel"
-                echo "5) Shatel"
-                echo "6) AsiaTech"
-                echo "7) Pishgaman"
-                echo "8) MobinNet"
-                echo "9) ParsOnline"
-                echo "b) Back"
-                read -p "Enter ISP option: " isp
+# نمایش قوانین iptables فعلی
+show_rules() {
+    echo "Current iptables rules:"
+    iptables -S
+}
 
-                case $isp in
-                    1)
-                        IP_LIST=$(curl -s 'https://raw.githubusercontent.com/meta-syfu/ASN-Blocker/master/mci.ipv4')
-                        ISP_NAME="MCI"
-                        ;;
-                    2)
-                        IP_LIST=$(curl -s 'https://raw.githubusercontent.com/meta-syfu/ASN-Blocker/master/mtn.ipv4')
-                        ISP_NAME="MTN"
-                        ;;
-                    3)
-                        IP_LIST=$(curl -s 'https://raw.githubusercontent.com/meta-syfu/ASN-Blocker/master/tci.ipv4')
-                        ISP_NAME="TCI"
-                        ;;
-                    4)
-                        IP_LIST=$(curl -s 'https://raw.githubusercontent.com/meta-syfu/ASN-Blocker/master/ritel.ipv4')
-                        ISP_NAME="Rightel"
-                        ;;
-                    5)
-                        IP_LIST=$(curl -s 'https://raw.githubusercontent.com/meta-syfu/ASN-Blocker/master/shatel.ipv4')
-                        ISP_NAME="Shatel"
-                        ;;
-                    6)
-                        IP_LIST=$(curl -s 'https://raw.githubusercontent.com/meta-syfu/ASN-Blocker/master/asiatech.ipv4')
-                        ISP_NAME="AsiaTech"
-                        ;;
-                    7)
-                        IP_LIST=$(curl -s 'https://raw.githubusercontent.com/meta-syfu/ASN-Blocker/master/pishgaman.ipv4')
-                        ISP_NAME="Pishgaman"
-                        ;;
-                    8)
-                        IP_LIST=$(curl -s 'https://raw.githubusercontent.com/meta-syfu/ASN-Blocker/master/mobinnet.ipv4')
-                        ISP_NAME="MobinNet"
-                        ;;
-                    9)
-                        IP_LIST=$(curl -s 'https://raw.githubusercontent.com/meta-syfu/ASN-Blocker/master/parsan.ipv4')
-                        ISP_NAME="ParsOnline"
-                        ;;
-                    b)
-                        break
-                        ;;
-                    *)
-                        echo "Invalid option."
-                        continue
-                        ;;
-                esac
+# دریافت رنج IP ها از ASN
+fetch_ip_ranges() {
+    ASN=$1
+    response=$(curl -s -X GET "$ASN_LOOKUP_URL?asn=$ASN" \
+        -H "X-Rapidapi-Host: asn-lookup.p.rapidapi.com" \
+        -H "X-Rapidapi-Key: $ASN_API_KEY")
+    
+    if [[ $response == *"ipv4_prefix"* ]]; then
+        echo "$response" | grep -oP '"ipv4_prefix":\s*\[\K[^\]]+' | tr -d '"' | tr ',' '\n'
+    else
+        echo "Error fetching IP ranges for ASN: $ASN"
+    fi
+}
 
-                echo "Selected ISP: $ISP_NAME"
+# ست کردن iptables برای یک ISP و پورت مشخص
+set_iptables_for_isp() {
+    ISP=$1
+    PORT=$2
+    DEFAULT_PORTS=$3
 
-                echo "Do you want to:"
-                echo "1) Set new ports"
-                echo "2) Remove existing rules for this ISP"
-                echo "b) Back"
-                read -p "Enter your choice: " action
+    # دریافت رنج‌های IP برای ISP
+    ASN=${ASN_LIST[$ISP]}
+    IP_RANGES=$(fetch_ip_ranges $ASN)
 
-                if [[ "$action" == "1" ]]; then
-                    read -p "Enter ports to open (comma-separated, e.g., 30001,80): " ports
-                    IFS=',' read -ra PORT_ARRAY <<< "$ports"
-                    # Block all ISPs on the specified ports first
-                    for port in "${PORT_ARRAY[@]}"; do
-                        ufw deny "$port"
-                    done
-                    # Allow only selected ISP for the ports
-                    for port in "${PORT_ARRAY[@]}"; do
-                        for ip in $IP_LIST; do
-                            ufw allow from "$ip" to any port "$port"
-                        done
-                    done
-                    echo "Ports $ports opened for $ISP_NAME only."
-                elif [[ "$action" == "2" ]]; then
-                    for port in "${PORT_ARRAY[@]}"; do
-                        for ip in $IP_LIST; do
-                            ufw delete allow from "$ip" to any port "$port"
-                        done
-                    done
-                    echo "Rules for $ISP_NAME removed."
-                elif [[ "$action" == "b" ]]; then
-                    continue
-                else
-                    echo "Invalid option."
-                fi
-            done
-            ;;
-        2)
-            # باز کردن پورت‌ها برای همه ISP ها
-            read -p "Enter ports to open for all ISPs (comma-separated, e.g., 22,2053): " ports
-            IFS=',' read -ra PORT_ARRAY <<< "$ports"
-            for port in "${PORT_ARRAY[@]}"; do
-                ufw allow "$port"
-            done
-            echo "Ports $ports opened for all ISPs."
-            ;;
-        3)
-            # پاک کردن همه قوانین
-            ufw reset
-            echo "All ufw rules cleared."
-            ;;
-        4)
-            # خروج
-            echo "Exiting."
-            break
-            ;;
-        *)
-            echo "Invalid option."
-            ;;
-    esac
-done
+    # باز کردن پورت برای IPهای خاص و بلاک کردن سایرین
+    for IP_RANGE in $IP_RANGES; do
+        iptables -A INPUT -p tcp --dport $PORT -s $IP_RANGE -j ACCEPT
+    done
 
-# فعال کردن UFW
-ufw enable
+    # بلاک کردن همه IP‌های دیگر برای پورت مشخص‌شده
+    iptables -A INPUT -p tcp --dport $PORT -j DROP
+    
+    # باز کردن پورت‌های دیفالت برای همه ISP ها
+    for DEFAULT_PORT in ${DEFAULT_PORTS//,/ }; do
+        iptables -A INPUT -p tcp --dport $DEFAULT_PORT -j ACCEPT
+    done
+
+    # باز کردن پورت SSH (22) همیشه
+    iptables -A INPUT -p tcp --dport 22 -j ACCEPT
+}
+
+# حذف قوانین iptables برای یک ISP
+clear_isp_rules() {
+    ISP=$1
+    PORT=$2
+
+    ASN=${ASN_LIST[$ISP]}
+    IP_RANGES=$(fetch_ip_ranges $ASN)
+
+    for IP_RANGE in $IP_RANGES; do
+        iptables -D INPUT -p tcp --dport $PORT -s $IP_RANGE -j ACCEPT
+    done
+
+    iptables -D INPUT -p tcp --dport $PORT -j DROP
+}
+
+# ذخیره قوانین iptables بعد از ریبوت
+save_iptables_rules() {
+    iptables-save > /etc/iptables/rules.v4
+}
+
+# منوی اصلی
+main_menu() {
+    while true; do
+        clear
+        show_rules
+        echo "1) Set rules for specific ISP and port"
+        echo "2) Set default ports for all ISPs"
+        echo "3) Clear all rules"
+        echo "4) Exit"
+        read -p "Select an option: " OPTION
+
+        case $OPTION in
+            1)
+                echo "Available ISPs: ${!ASN_LIST[@]}"
+                read -p "Enter ISP: " ISP
+                read -p "Enter port: " PORT
+                read -p "Enter default ports for all ISPs (comma-separated): " DEFAULT_PORTS
+                set_iptables_for_isp "$ISP" "$PORT" "$DEFAULT_PORTS"
+                save_iptables_rules
+                ;;
+            2)
+                read -p "Enter default ports (comma-separated): " DEFAULT_PORTS
+                for ISP in "${!ASN_LIST[@]}"; do
+                    set_iptables_for_isp "$ISP" "0" "$DEFAULT_PORTS"
+                done
+                save_iptables_rules
+                ;;
+            3)
+                iptables -F
+                save_iptables_rules
+                ;;
+            4)
+                exit 0
+                ;;
+            *)
+                echo "Invalid option, please try again."
+                ;;
+        esac
+    done
+}
+
+main_menu
