@@ -1,8 +1,8 @@
 #!/bin/bash
 
 # نمایش قوانین موجود
-echo "Current iptables rules:"
-iptables -S
+echo "Current ufw rules:"
+ufw status numbered
 
 # انتخاب نوع عملیات
 while true; do
@@ -87,15 +87,22 @@ while true; do
                 if [[ "$action" == "1" ]]; then
                     read -p "Enter ports to open (comma-separated, e.g., 30001,80): " ports
                     IFS=',' read -ra PORT_ARRAY <<< "$ports"
+                    # Block all ISPs on the specified ports first
+                    for port in "${PORT_ARRAY[@]}"; do
+                        ufw deny "$port"
+                    done
+                    # Allow only selected ISP for the ports
                     for port in "${PORT_ARRAY[@]}"; do
                         for ip in $IP_LIST; do
-                            iptables -A INPUT -p tcp -s "$ip" --dport "$port" -j ACCEPT
+                            ufw allow from "$ip" to any port "$port"
                         done
                     done
-                    echo "Ports $ports opened for $ISP_NAME."
+                    echo "Ports $ports opened for $ISP_NAME only."
                 elif [[ "$action" == "2" ]]; then
-                    for ip in $IP_LIST; do
-                        iptables -D INPUT -s "$ip" -j ACCEPT
+                    for port in "${PORT_ARRAY[@]}"; do
+                        for ip in $IP_LIST; do
+                            ufw delete allow from "$ip" to any port "$port"
+                        done
                     done
                     echo "Rules for $ISP_NAME removed."
                 elif [[ "$action" == "b" ]]; then
@@ -110,14 +117,14 @@ while true; do
             read -p "Enter ports to open for all ISPs (comma-separated, e.g., 22,2053): " ports
             IFS=',' read -ra PORT_ARRAY <<< "$ports"
             for port in "${PORT_ARRAY[@]}"; do
-                iptables -A INPUT -p tcp --dport "$port" -j ACCEPT
+                ufw allow "$port"
             done
             echo "Ports $ports opened for all ISPs."
             ;;
         3)
             # پاک کردن همه قوانین
-            iptables -F
-            echo "All iptables rules cleared."
+            ufw reset
+            echo "All ufw rules cleared."
             ;;
         4)
             # خروج
@@ -129,3 +136,6 @@ while true; do
             ;;
     esac
 done
+
+# فعال کردن UFW
+ufw enable
