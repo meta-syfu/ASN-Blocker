@@ -16,15 +16,16 @@ fetch_ip_ranges() {
     ASN=$1
     echo -e "${YELLOW}Fetching IP ranges for ASN: $ASN...${NC}"
     
+    # Call ASN API to get IP ranges
     response=$(curl -s -X GET "$ASN_LOOKUP_URL?asn=$ASN" \
         -H "Host: asn-lookup.p.rapidapi.com" \
         -H "X-Rapidapi-Host: asn-lookup.p.rapidapi.com" \
         -H "X-Rapidapi-Key: $API_KEY")
 
-    # Check if the response contains IP ranges
+    # Extract IP ranges from the response
     if [[ $response == *"ipv4_prefix"* ]]; then
-        # Extract IP ranges
-        echo "$response" | grep -oP '"ipv4_prefix":\s*\[\K[^\]]+' | tr -d '"' | tr ',' '\n'
+        ip_ranges=$(echo "$response" | grep -oP '"ipv4_prefix":\s*\[\K[^\]]+' | tr -d '"' | tr ',' '\n')
+        echo "$ip_ranges"
     else
         echo -e "${RED}Error fetching IP ranges for ASN: $ASN${NC}"
         echo -e "${RED}Response: $response${NC}"
@@ -54,7 +55,9 @@ apply_isp_rules() {
     # Fetch the IP ranges for the selected ASN
     IP_LIST=$(fetch_ip_ranges $ASN)
 
-    if [[ $? -ne 0 ]]; then
+    # If no IPs are returned, exit early
+    if [[ $? -ne 0 || -z "$IP_LIST" ]]; then
+        echo -e "${RED}No IP ranges found for ASN: $ASN${NC}"
         return 1
     fi
 
@@ -63,6 +66,7 @@ apply_isp_rules() {
     # Apply iptables rules to allow traffic from the ISP's IP ranges on the specified port
     for IP in $IP_LIST; do
         iptables -A INPUT -p tcp -s $IP --dport $PORT -j ACCEPT
+        echo -e "${CYAN}Allowed traffic from $IP on port $PORT${NC}"
     done
 
     # Block all other connections on the specified port
@@ -76,6 +80,7 @@ set_default_ports() {
     PORTS=($1)
     for PORT in "${PORTS[@]}"; do
         iptables -A INPUT -p tcp --dport $PORT -j ACCEPT
+        echo -e "${CYAN}Opened port $PORT for all ISPs${NC}"
     done
     echo -e "${GREEN}Default ports $1 are now open for all ISPs!${NC}"
 }
