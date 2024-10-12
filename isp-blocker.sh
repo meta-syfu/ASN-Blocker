@@ -18,13 +18,15 @@ declare -A ASN_LIST=(
 # نمایش قوانین iptables فعلی
 show_rules() {
     echo "Current iptables rules:"
-    iptables -S
+    iptables -S || echo "Error showing iptables rules"
 }
 
 # دریافت رنج IP ها از ASN
 fetch_ip_ranges() {
     ASN=$1
+    echo "Fetching IP ranges for ASN: $ASN"
     response=$(curl -s -X GET "$ASN_LOOKUP_URL?asn=$ASN" \
+        -H "Host: asn-lookup.p.rapidapi.com" \
         -H "X-Rapidapi-Host: asn-lookup.p.rapidapi.com" \
         -H "X-Rapidapi-Key: $ASN_API_KEY")
     
@@ -32,6 +34,7 @@ fetch_ip_ranges() {
         echo "$response" | grep -oP '"ipv4_prefix":\s*\[\K[^\]]+' | tr -d '"' | tr ',' '\n'
     else
         echo "Error fetching IP ranges for ASN: $ASN"
+        echo "Response: $response"
     fi
 }
 
@@ -43,22 +46,27 @@ set_iptables_for_isp() {
 
     # دریافت رنج‌های IP برای ISP
     ASN=${ASN_LIST[$ISP]}
+    echo "Setting iptables rules for $ISP (ASN: $ASN) on port $PORT"
     IP_RANGES=$(fetch_ip_ranges $ASN)
 
     # باز کردن پورت برای IPهای خاص و بلاک کردن سایرین
     for IP_RANGE in $IP_RANGES; do
+        echo "Allowing $IP_RANGE for port $PORT"
         iptables -A INPUT -p tcp --dport $PORT -s $IP_RANGE -j ACCEPT
     done
 
     # بلاک کردن همه IP‌های دیگر برای پورت مشخص‌شده
+    echo "Blocking all other IPs for port $PORT"
     iptables -A INPUT -p tcp --dport $PORT -j DROP
     
     # باز کردن پورت‌های دیفالت برای همه ISP ها
     for DEFAULT_PORT in ${DEFAULT_PORTS//,/ }; do
+        echo "Allowing default port $DEFAULT_PORT for all ISPs"
         iptables -A INPUT -p tcp --dport $DEFAULT_PORT -j ACCEPT
     done
 
     # باز کردن پورت SSH (22) همیشه
+    echo "Allowing SSH (port 22)"
     iptables -A INPUT -p tcp --dport 22 -j ACCEPT
 }
 
@@ -68,9 +76,11 @@ clear_isp_rules() {
     PORT=$2
 
     ASN=${ASN_LIST[$ISP]}
+    echo "Clearing rules for $ISP (ASN: $ASN) on port $PORT"
     IP_RANGES=$(fetch_ip_ranges $ASN)
 
     for IP_RANGE in $IP_RANGES; do
+        echo "Removing $IP_RANGE for port $PORT"
         iptables -D INPUT -p tcp --dport $PORT -s $IP_RANGE -j ACCEPT
     done
 
@@ -79,7 +89,8 @@ clear_isp_rules() {
 
 # ذخیره قوانین iptables بعد از ریبوت
 save_iptables_rules() {
-    iptables-save > /etc/iptables/rules.v4
+    echo "Saving iptables rules"
+    iptables-save > /etc/iptables/rules.v4 || echo "Error saving iptables rules"
 }
 
 # منوی اصلی
