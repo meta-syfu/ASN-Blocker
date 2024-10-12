@@ -45,7 +45,7 @@ apply_isp_rules() {
         3) ASN="AS44244" ;;   # MTN Irancell
         4) ASN="AS50810" ;;   # MobinNet
         5) ASN="AS16322" ;;   # ParsOnline
-        6) ASN="AS57831" ;;   # Pishgaman
+        6) ASN="AS34918" ;;   # Pishgaman
         7) ASN="AS57218" ;;   # Rightel
         8) ASN="AS31549" ;;   # Shatel
         9) ASN="AS58224" ;;   # TCI
